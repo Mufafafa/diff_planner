@@ -3,25 +3,25 @@
 # diff_planner
 
 ## 概述
-**Diff-Planner** 是为**微分智飞**公司旗下教育无人机子品牌**非凸空间**适配的单机导航避障算法。其基于开源算法 **[EGO-Planner-v2](https://github.com/ZJU-FAST-Lab/EGO-Planner-v2)** ，并由原班人马深度参与算法优化。在继承 **EGO-Planner** 优秀框架的基础上，针对教育无人机平台的特殊需求进行了全面适配和增强，旨在提供更稳定、更可靠的科研体验。
+**diff_planner** 是为**微分智飞**公司旗下教育无人机子品牌**非凸空间**适配的单机导航避障算法。其基于开源算法 **[EGO-Planner-v2](https://github.com/ZJU-FAST-Lab/EGO-Planner-v2)** ，并由原班人马深度参与算法优化。在继承 **EGO-Planner** 优秀框架的基础上，针对教育无人机平台的特殊需求进行了全面适配和增强，旨在提供更稳定、更可靠的科研体验。
 
 <p align="center">
   <img src="images/navigation.gif" alt="nav" width="600" />
 </p>
 
 ## 算法优化
-- **Diff-Planner** 在 **[EGO-Planner-v2](https://github.com/ZJU-FAST-Lab/EGO-Planner-v2)** 基础上做了多处优化，包括：
+- **diff_planner** 在 **[EGO-Planner-v2](https://github.com/ZJU-FAST-Lab/EGO-Planner-v2)** 基础上做了多处优化，包括：
 >+ **修复**局部规划时 A* 终点在障碍物里，尝试沿 A* 起始方向推出障碍物时的bug。
 
 >+ **修复**优化过程中频繁打印局部目标点在障碍物里（"Local target in collision, skip this planning."），规划器卡死的bug。
 
 >+ **修复**在状态机中使用 **planNextWaypoint()** 导致状态机卡死的bug。
 
->+ **新增**规划优化异常检测， 避免动力学不可行的轨迹发出，新增了动力学容忍值（[advanced_param.xml](src/diff_planner/plan_manage/launch/include/advanced_param.xml)中设置）：\
+>+ **新增**规划优化异常检测， 避免动力学不可行的轨迹发出，新增了动力学容忍值（[advanced_param_exp.xml](src/plan_manage/launch/include/advanced_param_exp.xml)中设置）：\
 \<param name="optimization/vel_tolerance" value="1.0" type="double"/>  \
 \<param name="optimization/acc_tolerance" value="1.0" type="double"/>
 
->+ **修复**遇到大障碍物后，无人机在大障碍物面前反复徘徊卡死的bug，同时增加是否使用大障碍物检测的开关（[advanced_param.xml](src/diff_planner/plan_manage/launch/include/advanced_param_exp.xml)中设置）：\
+>+ **修复**遇到大障碍物后，无人机在大障碍物面前反复徘徊卡死的bug，同时增加是否使用大障碍物检测的开关（[advanced_param_exp.xml](src/plan_manage/launch/include/advanced_param_exp.xml)中设置）：\
 >\<param name="fsm/enable_stuck_detect" value="true"/> 
 
 >+ **新增**优化失败次数过多的处理。
@@ -83,6 +83,9 @@ cd ~/workspace #新建终端
 ./sh_files/pub_swarm_trigger.sh #开始执行任务
 ```
 
+<p align="center">
+  <img src="images/swarm.gif" alt="swarm" width="600" />
+</p>
 
 ## 致谢与声明
 本项目在开发过程中参考并使用了 **[EGO-Planner-v2](https://github.com/ZJU-FAST-Lab/EGO-Planner-v2)**，特此感谢浙江大学 **FAST-Lab** 团队的开源贡献。
