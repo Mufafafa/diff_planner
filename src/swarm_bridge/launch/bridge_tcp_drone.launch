@@ -9,9 +9,12 @@
     <param name="self_id" value="$(arg drone_id)"/>
     <param name="is_ground_station" value="false"/>
     <param name="odom_max_freq" value="10"/>
-    <param name="drone_num" value="2"/>
-    <param name="drone_ip_0" value="192.168.8.123" type="string"/>
-    <param name="drone_ip_1" value="192.168.8.103" type="string"/>
+    <param name="drone_num" value="$(env DRONE_NUM)"/>
+    <param name="drone_ip_0" value="$(env DRONE_IP_0)" type="string"/>
+    <param name="drone_ip_1" value="$(env DRONE_IP_1)" type="string"/>
+    <param name="drone_ip_2" value="$(env DRONE_IP_2)" type="string"/>
+    <param name="drone_ip_3" value="$(env DRONE_IP_3)" type="string"/>
+    <param name="drone_ip_4" value="$(env DRONE_IP_4)" type="string"/>
     <param name="ground_station_num" value="1"/>
     <param name="ground_station_ip_0" value="$(env GS_IP)" type="string"/>
 
