@@ -8,7 +8,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 find_package(Eigen3 REQUIRED)
 
-set(ENABLE_TCP false) # requires zmq, zmqpp 
+set(ENABLE_TCP true) # requires zmq, zmqpp 
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
