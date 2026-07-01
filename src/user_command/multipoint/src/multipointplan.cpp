@@ -60,13 +60,6 @@ struct pytStr {
     double time;
 };
 
-enum FLIGT_TYPE{
-    PP = 1,
-    PP_TIME = 2,
-    PP_YAW = 3,
-    PP_YAW_TIME = 4
-};
-
 Eigen::Vector3d odom_pos_, odom_vel_, odom_acc_;     // odometry state
 double odom_yaw_ = 0.0;                               // current yaw angle from odometry
 Eigen::Vector3d back_pos{0.0, 0.0, 1.2};
@@ -77,8 +70,6 @@ int counts = 0;  //正在规划的点位次序
 double distance_ = 10.0;  //规划的点到当前点的距离
 double next_distance; 
 quadrotor_msgs::PositionCommand cmd_yaw;
-bool time_flag = false;
-int fligt_type;
 bool trigger = false;
 int flag_start_plan;
 int flag_back_plan;
@@ -111,18 +102,6 @@ void readpyt(string file_path)
         return;
     }
 
-    // Determine which section and element count to look for
-    string section;
-    int size_arr;
-    if (fligt_type == FLIGT_TYPE::PP)      { section = "test1"; size_arr = 3; }
-    else if (fligt_type == FLIGT_TYPE::PP_TIME) { section = "test2"; size_arr = 4; }
-    else if (fligt_type == FLIGT_TYPE::PP_YAW)  { section = "test3"; size_arr = 4; }
-    else                                   { section = "test4"; size_arr = 5; }
-
-    // Read file line by line — no YAML library needed, handles all formats:
-    //   - [x, y, z]
-    //   [x, y, z]
-    //   test1: [[x,y,z], ...]
     std::ifstream file(file_path);
     if (!file.is_open())
     {
@@ -130,28 +109,25 @@ void readpyt(string file_path)
         return;
     }
 
-    bool in_section = false, in_back = false;
-    std::regex bracket_re(R"(\[([^\[\]][^\]]*)\])");  // inner [...] only
+    bool in_points = false, in_back = false;
+    std::regex bracket_re(R"(\[([^\[\]][^\]]*)\])");
     string line;
 
     while (std::getline(file, line))
     {
-        // Detect section headers
-        if (line.find("test1:") != string::npos && section == "test1") in_section = true;
-        else if (line.find("test2:") != string::npos && section == "test2") in_section = true;
-        else if (line.find("test3:") != string::npos && section == "test3") in_section = true;
-        else if (line.find("test4:") != string::npos && section == "test4") in_section = true;
-        else if (line.find("test_back:") != string::npos) { in_section = false; in_back = true; }
-        else if (line.find("test") != string::npos && line.find("test_back") == string::npos)
-            in_section = false;  // another test section, stop
+        if (line.find("points:") != string::npos && line.find("back_points") == string::npos)
+            { in_points = true; in_back = false; }
+        else if (line.find("back_points:") != string::npos)
+            { in_points = false; in_back = true; }
+        else if (line.find("test") != string::npos)
+            in_points = false;  // block old test sections
 
-        if (!in_section && !in_back) continue;
-        // Strip YAML comment: remove everything after '#'
+        if (!in_points && !in_back) continue;
+
         size_t comment_pos = line.find('#');
         if (comment_pos != string::npos)
             line = line.substr(0, comment_pos);
-            
-        // Extract all [...] patterns on this line
+
         auto it = std::sregex_iterator(line.begin(), line.end(), bracket_re);
         auto end = std::sregex_iterator();
 
@@ -160,29 +136,30 @@ void readpyt(string file_path)
             vector<double> vals = parseBracketContent((*it)[1].str());
             if (vals.empty()) continue;
 
-            if (in_section)
+            if (in_points)
             {
-                if ((int)vals.size() != size_arr)
+                if (vals.size() < 3 || vals.size() > 5)
                 {
-                    ROS_ERROR("Point format error: expected %d elements, got %zu", size_arr, vals.size());
+                    ROS_ERROR("Point format error: expected 3-5 elements, got %zu", vals.size());
                     return;
                 }
                 pytStr pyt_;
                 pyt_.x = vals[0]; pyt_.y = vals[1]; pyt_.z = vals[2];
-                if (fligt_type == FLIGT_TYPE::PP_YAW)           pyt_.yaw = vals[3];
-                else if (fligt_type == FLIGT_TYPE::PP_YAW_TIME) { pyt_.yaw = vals[3]; pyt_.time = vals[4]; }
-                else if (fligt_type == FLIGT_TYPE::PP_TIME)     pyt_.time = vals[3];
+                pyt_.yaw = (vals.size() >= 4) ? vals[3] : -100;
+                pyt_.time = (vals.size() >= 5) ? vals[4] : 0;
                 start_pytVector.push_back(pyt_);
             }
             else if (in_back)
             {
-                if (vals.size() != 3)
+                if (vals.size() < 3)
                 {
                     ROS_ERROR("Back point format error: expected 3 elements, got %zu", vals.size());
                     return;
                 }
                 pytStr pyt_;
                 pyt_.x = vals[0]; pyt_.y = vals[1]; pyt_.z = vals[2];
+                pyt_.yaw = (vals.size() >= 4) ? vals[3] : -100;
+                pyt_.time = (vals.size() >= 5) ? vals[4] : 0;
                 back_pytVector.push_back(pyt_);
             }
         }
@@ -190,20 +167,23 @@ void readpyt(string file_path)
 
     if (start_pytVector.empty())
     {
-        ROS_ERROR("No points loaded for section %s. Check the file format.", section.c_str());
+        ROS_ERROR("No points loaded. Check the file format (expect 'points:' and 'back_points:' sections).");
         return;
     }
 
-    ROS_INFO("Loaded pyt from file:");
+    ROS_INFO("Loaded waypoints:");
     for (size_t i = 0; i < start_pytVector.size(); i++)
     {
-        ROS_INFO("pyt %zu: [%f, %f, %f, %f, %f]", i+1, start_pytVector[i].x, start_pytVector[i].y, start_pytVector[i].z, start_pytVector[i].yaw, start_pytVector[i].time);
+        ROS_INFO("  point %zu: [%.2f, %.2f, %.2f, yaw=%.1f, time=%.1f]",
+                 i+1, start_pytVector[i].x, start_pytVector[i].y, start_pytVector[i].z,
+                 start_pytVector[i].yaw, start_pytVector[i].time);
     }
     for (size_t i = 0; i < back_pytVector.size(); i++)
     {
-        ROS_INFO("back_pyt %zu: [%f, %f, %f]", i+1, back_pytVector[i].x, back_pytVector[i].y, back_pytVector[i].z);
+        ROS_INFO("  back %zu: [%.2f, %.2f, %.2f]", i+1,
+                 back_pytVector[i].x, back_pytVector[i].y, back_pytVector[i].z);
     }
-    cout << "距离判断" << next_distance << endl;
+    ROS_INFO("Arrival threshold: %.2f m", next_distance);
 }
 
 
@@ -310,25 +290,17 @@ void Point_send(const ros::TimerEvent& event)
         goal.pose.position.y = first_target.y();
         goal.pose.position.z = first_target.z();
         point_pub.publish(goal);
-        // Clear pre-alignment yaw for pure position modes (no waypoint yaw),
+        // Clear pre-alignment yaw when waypoint has no explicit yaw (yaw=-100),
         // otherwise traj_server arrival alignment would rotate at the waypoint.
-        if (enable_yaw_align && (fligt_type == FLIGT_TYPE::PP || fligt_type == FLIGT_TYPE::PP_TIME))
+        if (enable_yaw_align && pytVector[0].yaw == -100)
         {
           cmd_yaw.yaw = -100;
           yaw_pub.publish(cmd_yaw);
         }
-        if(fligt_type == FLIGT_TYPE::PP_YAW_TIME){  
-            ROS_INFO("Publish the first pyt: [x:%f, y:%f, z:%f, yaw:%f, time:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z, cmd_yaw.yaw, pytVector[counts].time);
-        }
-        else if(fligt_type == FLIGT_TYPE::PP_TIME){
-            ROS_INFO("Publish the first pyt: [x:%f, y:%f, z:%f, time:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z, pytVector[counts].time);
-        }
-        else if(fligt_type == FLIGT_TYPE::PP_YAW){
-            ROS_INFO("Publish the first pyt: [x:%f, y:%f, z:%f, yaw:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z, pytVector[counts].yaw);
-        }
-        else{
-            ROS_INFO("Publish the first pyt: [x:%f, y:%f, z:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z);
-        }
+        ROS_INFO("Publish first waypoint [%zu/%zu]: [%.2f, %.2f, %.2f, yaw=%.1f, time=%.1f]",
+                 counts+1, start_pytVector.size(),
+                 goal.pose.position.x, goal.pose.position.y, goal.pose.position.z,
+                 pytVector[counts].yaw, pytVector[counts].time);
         counts++;
     }
 
@@ -340,17 +312,14 @@ void Point_send(const ros::TimerEvent& event)
 
     if (distance_ < next_distance && counts < pytVector.size())   //到达目标点并且还有下一个点
     {
-        if(fligt_type == FLIGT_TYPE::PP_TIME || fligt_type == FLIGT_TYPE::PP_YAW_TIME){
+        if(pytVector[counts_pre].time > 0){
             timer.stop();
-            ROS_INFO("Timer stopped.");
+            ROS_INFO("Waiting %.1fs at waypoint %d", pytVector[counts_pre].time, counts_pre + 1);
 
-            double time_wait = pytVector[counts_pre].time;   //等待时间
+            double time_wait = pytVector[counts_pre].time;
             ros::Duration(time_wait).sleep();
-            // Update odometry after sleep: arrival alignment completed during the wait,
-            // so odom_yaw_ now reflects the waypoint's target yaw, not the flight yaw.
             ros::spinOnce();
             timer.start();
-            ROS_INFO("Timer started.");
         }
 
         // yaw pre-alignment: rotate to face next target direction before sending goal
@@ -396,31 +365,22 @@ void Point_send(const ros::TimerEvent& event)
         goal.pose.position.y = next_target.y();
         goal.pose.position.z = next_target.z();
         point_pub.publish(goal);
-        // Clear pre-alignment yaw for pure position modes (no waypoint yaw),
-        // otherwise traj_server arrival alignment would rotate at the waypoint.
-        if (enable_yaw_align && (fligt_type == FLIGT_TYPE::PP || fligt_type == FLIGT_TYPE::PP_TIME))
+        // Clear pre-alignment yaw when waypoint has no explicit yaw (yaw=-100)
+        if (enable_yaw_align && pytVector[counts].yaw == -100)
         {
           cmd_yaw.yaw = -100;
           yaw_pub.publish(cmd_yaw);
         }
-        if(fligt_type == FLIGT_TYPE::PP_YAW_TIME){   
-            ROS_INFO("Publish the next pyt: [x:%f, y:%f, z:%f, yaw:%f, time:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z, cmd_yaw.yaw, pytVector[counts].time);
-        }
-        else if(fligt_type == FLIGT_TYPE::PP_TIME){
-            ROS_INFO("Publish the next pyt: [x:%f, y:%f, z:%f, time:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z, pytVector[counts].time);
-        }
-        else if(fligt_type == FLIGT_TYPE::PP_YAW){
-            ROS_INFO("Publish the next pyt: [x:%f, y:%f, z:%f, yaw:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z, cmd_yaw.yaw);
-        }
-        else{
-            ROS_INFO("Publish the next pyt: [x:%f, y:%f, z:%f]", goal.pose.position.x, goal.pose.position.y, goal.pose.position.z);
-        }
+        ROS_INFO("Publish next waypoint [%zu/%zu]: [%.2f, %.2f, %.2f, yaw=%.1f, time=%.1f]",
+                 counts+1, start_pytVector.size(),
+                 goal.pose.position.x, goal.pose.position.y, goal.pose.position.z,
+                 pytVector[counts].yaw, pytVector[counts].time);
         counts++;
     }
 
     if (distance_ > next_distance && counts_pre < pytVector.size())
     {
-        if(fligt_type == FLIGT_TYPE::PP_YAW || fligt_type == FLIGT_TYPE::PP_YAW_TIME)
+        if(pytVector[counts_pre].yaw != -100)
         {
             cmd_yaw.position.x = odom_pos_(0);
             cmd_yaw.position.y = odom_pos_(1);
@@ -467,8 +427,7 @@ void backplan_cb(const geometry_msgs::PoseStamped::ConstPtr &msg)
 
     pytVector.clear();
     pytVector.assign(back_pytVector.begin(), back_pytVector.end());
-    counts = 0;    
-    fligt_type = FLIGT_TYPE::PP;
+    counts = 0;
     trigger = true;
     ROS_INFO("Get back trigger.");
 }
@@ -591,31 +550,19 @@ int main(int argc, char** argv)
     ros::NodeHandle nh;
 
     string yaml_path;
-    if (!nh.getParam("/multipointplan/yaml_path", yaml_path) || 
-        !nh.getParam("/multipointplan/next_distance", next_distance) || 
+    if (!nh.getParam("/multipointplan/yaml_path", yaml_path) ||
+        !nh.getParam("/multipointplan/next_distance", next_distance) ||
         !nh.getParam("/multipointplan/start_plan", flag_start_plan) ||
         !nh.getParam("/multipointplan/back_plan", flag_back_plan) ||
-        !nh.getParam("/multipointplan/fligt_type", fligt_type) ||
         !nh.getParam("/multipointplan/auto_planning", auto_planning) ||
         !nh.getParam("/multipointplan/auto_landing", auto_landing))
     {
-        ROS_ERROR("Failed to get parameter ,please check it");
+        ROS_ERROR("Failed to get parameter, please check it");
         return 1;
     }
 
     nh.param("/multipointplan/enable_yaw_align", enable_yaw_align, false);
-    nh.param("/multipointplan/yaw_align_thresh", yaw_align_thresh, M_PI_2);  // default 90 deg
-
-    switch (fligt_type) {
-        case 1:
-        case 2:
-        case 3:
-        case 4:
-            break;
-        default:
-            ROS_ERROR("Failed to get a right fligt_type, please check it");
-            break;
-    }
+    nh.param("/multipointplan/yaw_align_thresh", yaw_align_thresh, M_PI_2);
 
     readpyt(yaml_path);
 
